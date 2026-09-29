@@ -1,6 +1,6 @@
 """
 Interface gráfica do trabalho: desenha o mapa, permite escolher o algoritmo
-de busca, calcular a rota, animar o agente percorrendo-a, comparar os quatro
+de busca, calcular a rota, animar o agente percorrendo-a, comparar os
 algoritmos entre si e (o pedido explícito) mostrar a árvore de busca gerada
 depois que o algoritmo termina.
 """
@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from arvore import mostrar_janela_arvore
-from busca import ALGORITMOS, ResultadoBusca
+from busca import ALGORITMOS, VALOR_RECOMPENSA, ResultadoBusca, executar_com_tempo_medio
 from mapa import Ambiente, PRESET_PADRAO, PRESETS_LABIRINTO, gerar_ambiente_preset
 
 CORES_TERRENO = {
@@ -99,7 +99,7 @@ class Aplicacao(tk.Tk):
         ttk.Label(
             cabecalho,
             text="Fundamentos de Sistemas Inteligentes — Trabalho 1  |  "
-                 "Largura · Profundidade · Gulosa · A*",
+                 "Largura · Profundidade · Gulosa · A* · Custo Uniforme",
             style="Subtitulo.TLabel",
         ).pack(anchor="w")
 
@@ -167,28 +167,31 @@ class Aplicacao(tk.Tk):
 
         ttk.Label(painel, text="Comparativo entre algoritmos", style="Secao.TLabel").pack(
             anchor="w", **pad)
-        ttk.Button(painel, text="Comparar os 4 Algoritmos",
+        ttk.Button(painel, text="Comparar Algoritmos (tempo médio)",
                    command=self._comparar_todos).pack(fill="x", padx=14, pady=(0, 6))
 
-        colunas = ("achou", "custo", "recompensas", "nos", "tempo")
+        colunas = ("custo", "recompensas", "saldo", "nos", "fronteira", "tempo")
         self.tabela = ttk.Treeview(painel, columns=colunas, show="tree headings",
-                                    height=5)
+                                    height=len(ALGORITMOS))
         self.tabela.heading("#0", text="Algoritmo")
-        self.tabela.heading("achou", text="Caminho")
         self.tabela.heading("custo", text="Custo")
         self.tabela.heading("recompensas", text="$")
-        self.tabela.heading("nos", text="Nós exp.")
-        self.tabela.heading("tempo", text="Tempo (ms)")
-        self.tabela.column("#0", width=150)
-        self.tabela.column("achou", width=55, anchor="center")
-        self.tabela.column("custo", width=50, anchor="center")
+        self.tabela.heading("saldo", text="Saldo")
+        self.tabela.heading("nos", text="Expand.")
+        self.tabela.heading("fronteira", text="Front.")
+        self.tabela.heading("tempo", text="ms")
+        self.tabela.column("#0", width=125)
+        self.tabela.column("custo", width=45, anchor="center")
         self.tabela.column("recompensas", width=30, anchor="center")
-        self.tabela.column("nos", width=60, anchor="center")
-        self.tabela.column("tempo", width=70, anchor="center")
+        self.tabela.column("saldo", width=45, anchor="center")
+        self.tabela.column("nos", width=55, anchor="center")
+        self.tabela.column("fronteira", width=45, anchor="center")
+        self.tabela.column("tempo", width=55, anchor="center")
         self.tabela.pack(fill="x", padx=14)
         self.tabela.bind("<Double-1>", self._ao_dar_duplo_clique_tabela)
-        ttk.Label(painel, text="Dica: dê duplo clique numa linha para ver a\n"
-                                "árvore de busca daquele algoritmo.",
+        ttk.Label(painel, text=f"Saldo = {VALOR_RECOMPENSA} × $ − custo. Front. = pico de "
+                                "nós na fronteira (memória). Duplo clique numa "
+                                "linha abre a árvore de busca.",
                    style="TLabel", wraplength=300, justify="left").pack(
             anchor="w", padx=14, pady=(4, 0))
 
@@ -366,6 +369,7 @@ class Aplicacao(tk.Tk):
             self.rotulo_status.configure(
                 text=f"[{resultado.nome}] Nenhum caminho encontrado até o objetivo "
                      f"{self.ambiente.objetivo}.\nNós expandidos: {resultado.nos_expandidos}  |  "
+                     f"Pico da fronteira: {resultado.max_fronteira}  |  "
                      f"Tempo: {resultado.tempo_execucao_s * 1000:.2f} ms")
             messagebox.showwarning(
                 "Caminho não encontrado",
@@ -382,7 +386,10 @@ class Aplicacao(tk.Tk):
                  f"Custo total do caminho: {resultado.custo_total}\n"
                  f"Recompensas coletadas: {len(resultado.recompensas_coletadas)} de "
                  f"{len(self.ambiente.recompensas)}\n"
-                 f"Nós expandidos: {resultado.nos_expandidos}\n"
+                 f"Saldo ({VALOR_RECOMPENSA} × $ − custo): {resultado.saldo}\n"
+                 f"Nós expandidos: {resultado.nos_expandidos}  |  gerados: "
+                 f"{resultado.nos_gerados}\n"
+                 f"Pico da fronteira: {resultado.max_fronteira}\n"
                  f"Tempo de execução: {resultado.tempo_execucao_s * 1000:.2f} ms")
 
     def _animar_agente(self) -> None:
@@ -436,7 +443,8 @@ class Aplicacao(tk.Tk):
                 self.rotulo_status.configure(
                     text=f"[{self.ultimo_resultado.nome}] Agente chegou ao objetivo!\n"
                          f"Custo total: {estado['custo']}\n"
-                         f"Recompensas coletadas: {estado['coletadas']}")
+                         f"Recompensas coletadas: {estado['coletadas']}\n"
+                         f"Saldo: {self.ultimo_resultado.saldo}")
 
         passo()
 
@@ -468,18 +476,22 @@ class Aplicacao(tk.Tk):
             self.tabela.delete(item)
         self.resultados_comparacao.clear()
 
+        self.rotulo_status.configure(text="Comparando algoritmos...")
+        self.update_idletasks()
         for nome, algoritmo in ALGORITMOS.items():
-            resultado = algoritmo(self.ambiente)
+            resultado = executar_com_tempo_medio(algoritmo, self.ambiente)
             self.resultados_comparacao[nome] = resultado
-            achou = "Sim" if resultado.encontrou_caminho else "Não"
-            custo = resultado.custo_total if resultado.encontrou_caminho else "—"
-            recompensas = len(resultado.recompensas_coletadas) if resultado.encontrou_caminho else 0
+            achou = resultado.encontrou_caminho
             self.tabela.insert("", "end", iid=nome, text=nome, values=(
-                achou, custo, recompensas, resultado.nos_expandidos,
+                resultado.custo_total if achou else "sem caminho",
+                len(resultado.recompensas_coletadas) if achou else "—",
+                resultado.saldo if achou else "—",
+                resultado.nos_expandidos, resultado.max_fronteira,
                 f"{resultado.tempo_execucao_s * 1000:.2f}"))
 
         self.rotulo_status.configure(
-            text="Comparação concluída para os 4 algoritmos.\n"
+            text=f"Comparação concluída ({len(ALGORITMOS)} algoritmos).\n"
+                 "Tempo = média de várias execuções de cada algoritmo.\n"
                  "Dê duplo clique numa linha da tabela para ver a árvore de busca "
                  "daquele algoritmo.")
 

@@ -21,7 +21,7 @@ import streamlit as st
 from matplotlib.figure import Figure
 
 from arvore import construir_figura
-from busca import ALGORITMOS, ResultadoBusca
+from busca import ALGORITMOS, VALOR_RECOMPENSA, ResultadoBusca, executar_com_tempo_medio
 from mapa import Ambiente, PRESET_PADRAO, PRESETS_LABIRINTO, gerar_ambiente_preset
 
 CORES_TERRENO = {
@@ -51,6 +51,7 @@ CORES_ALGORITMO = {
     "Busca em Profundidade": "#eb6834",
     "Busca Gulosa": "#1baf7a",
     "A*": "#eda100",
+    "Custo Uniforme": "#8e6ccf",
 }
 
 
@@ -176,8 +177,12 @@ def montar_tabela_comparacao(resultados: dict[str, ResultadoBusca], ambiente: Am
             "Custo total": r.custo_total if r.encontrou_caminho else None,
             "Recompensas": f"{len(r.recompensas_coletadas)}/{len(ambiente.recompensas)}"
                            if r.encontrou_caminho else "0",
+            "Saldo": r.saldo if r.encontrou_caminho else None,
             "Nós expandidos": r.nos_expandidos,
-            "Tempo (ms)": round(r.tempo_execucao_s * 1000, 3),
+            "Nós gerados": r.nos_gerados,
+            "Pico da fronteira": r.max_fronteira,
+            "Tempo médio (ms)": round(r.tempo_execucao_s * 1000, 3),
+            "Execuções": r.repeticoes_tempo,
         })
     return pd.DataFrame(linhas).set_index("Algoritmo")
 
@@ -217,7 +222,8 @@ def main() -> None:
 
     st.title("Navegação Autônoma por Busca em Grafo")
     st.caption("Fundamentos de Sistemas Inteligentes — Trabalho 1 (UTFPR) · "
-               "Busca em Largura · Busca em Profundidade · Busca Gulosa · A*")
+               "Busca em Largura · Busca em Profundidade · Busca Gulosa · A* · "
+               "Custo Uniforme")
 
     with st.sidebar:
         st.header("Controles")
@@ -271,8 +277,9 @@ def main() -> None:
                        "detecção de \"sem caminho\".")
 
         st.divider()
-        if st.button("Comparar os 4 Algoritmos", width="stretch"):
-            st.session_state.comparacao = {nome: algo(ambiente) for nome, algo in ALGORITMOS.items()}
+        if st.button("Comparar Algoritmos", width="stretch"):
+            st.session_state.comparacao = {nome: executar_com_tempo_medio(algo, ambiente)
+                                           for nome, algo in ALGORITMOS.items()}
 
     col_mapa, col_status = st.columns([2, 1], gap="large")
 
@@ -306,8 +313,11 @@ def main() -> None:
             m1.metric("Custo total", resultado.custo_total)
             m2.metric("Recompensas", f"{len(resultado.recompensas_coletadas)}/{len(ambiente.recompensas)}")
             m3, m4 = st.columns(2)
-            m3.metric("Nós expandidos", resultado.nos_expandidos)
-            m4.metric("Tempo", f"{resultado.tempo_execucao_s * 1000:.2f} ms")
+            m3.metric(f"Saldo ({VALOR_RECOMPENSA}×$ − custo)", resultado.saldo)
+            m4.metric("Nós expandidos", resultado.nos_expandidos)
+            m5, m6 = st.columns(2)
+            m5.metric("Pico da fronteira", resultado.max_fronteira)
+            m6.metric("Tempo", f"{resultado.tempo_execucao_s * 1000:.2f} ms")
 
     st.divider()
     aba_arvore, aba_comparacao = st.tabs(["Árvore de Busca", "Comparação entre Algoritmos"])
@@ -325,18 +335,24 @@ def main() -> None:
     with aba_comparacao:
         comparacao = st.session_state.comparacao
         if comparacao is None:
-            st.info("Clique em \"Comparar os 4 Algoritmos\" na barra lateral.")
+            st.info("Clique em \"Comparar Algoritmos\" na barra lateral.")
         else:
             st.dataframe(montar_tabela_comparacao(comparacao, ambiente), width="stretch")
-            g1, g2 = st.columns(2)
-            with g1:
-                fig1 = grafico_comparativo(comparacao, "nos_expandidos", "Nós expandidos", "%d")
-                st.pyplot(fig1, width="stretch")
-                plt.close(fig1)
-            with g2:
-                fig2 = grafico_comparativo(comparacao, "tempo_ms", "Tempo de execução (ms)", "%.2f")
-                st.pyplot(fig2, width="stretch")
-                plt.close(fig2)
+            st.caption(f"Saldo = {VALOR_RECOMPENSA} × recompensas − custo do percurso. "
+                       "Tempo = média de várias execuções. Pico da fronteira = maior "
+                       "número de nós aguardando expansão ao mesmo tempo (memória).")
+            graficos = [
+                ("nos_expandidos", "Nós expandidos", "%d"),
+                ("max_fronteira", "Pico da fronteira (memória)", "%d"),
+                ("tempo_ms", "Tempo médio de execução (ms)", "%.2f"),
+                ("saldo", "Saldo (maior é melhor)", "%d"),
+            ]
+            for linha in (graficos[:2], graficos[2:]):
+                for coluna_st, (atributo, titulo, fmt) in zip(st.columns(2), linha):
+                    with coluna_st:
+                        fig = grafico_comparativo(comparacao, atributo, titulo, fmt)
+                        st.pyplot(fig, width="stretch")
+                        plt.close(fig)
 
 
 if __name__ == "__main__":
