@@ -51,6 +51,11 @@ PRESETS_LABIRINTO: dict[str, dict] = {
                                             fracao_lacos=0.03, num_recompensas=6),
     "Aberto — muitos atalhos (21×15)": dict(seed=7, rows=15, cols_labirinto=21,
                                              fracao_lacos=0.35, num_recompensas=6),
+    # Prêmio dentro da sala sem portas: todos os algoritmos devem esgotar a
+    # fronteira e concluir que não existe caminho.
+    "Prêmio inalcançável (21×15)": dict(seed=42, rows=15, cols_labirinto=21,
+                                         fracao_lacos=0.15, num_recompensas=6,
+                                         premio_isolado=True),
 }
 PRESET_PADRAO = "Padrão (21×15)"
 
@@ -149,15 +154,32 @@ class Ambiente:
         que o agente está pisando ao chegar na célula."""
         return self.custo_terreno(destino)
 
+    def alcancaveis(self, origem: tuple[int, int]) -> set[tuple[int, int]]:
+        """Componente conexa de `origem` (BFS simples). Usada pelas buscas
+        informadas para descartar recompensas que ficam atrás de paredes."""
+        visitados = {origem}
+        fila = deque([origem])
+        while fila:
+            atual = fila.popleft()
+            for viz in self.vizinhos(atual):
+                if viz not in visitados:
+                    visitados.add(viz)
+                    fila.append(viz)
+        return visitados
+
 
 def gerar_ambiente(seed: int = SEED, rows: int = ROWS, cols_labirinto: int = COLS_LABIRINTO,
                     largura_sala_isolada: int = LARGURA_SALA_ISOLADA,
                     num_recompensas: int = NUM_RECOMPENSAS,
-                    fracao_lacos: float = 0.15) -> Ambiente:
+                    fracao_lacos: float = 0.15, premio_isolado: bool = False) -> Ambiente:
     """Gera um ambiente determinístico (mesma seed => mesmo mapa). Os
     parâmetros controlam o "formato" do labirinto: tamanho, quantidade de
     atalhos/laços e número de recompensas — usados pelos presets em
-    `PRESETS_LABIRINTO` para oferecer mapas bem diferentes entre si."""
+    `PRESETS_LABIRINTO` para oferecer mapas bem diferentes entre si.
+
+    Além das `num_recompensas` do labirinto, uma recompensa extra é sempre
+    colocada na sala isolada (inalcançável). Com `premio_isolado=True` o
+    próprio prêmio final também fica lá dentro."""
     rng = random.Random(seed)
     grid_labirinto = _gerar_labirinto(rows, cols_labirinto, rng)
     _adicionar_lacos(grid_labirinto, rng, rows, cols_labirinto, fracao=fracao_lacos)
@@ -188,6 +210,9 @@ def gerar_ambiente(seed: int = SEED, rows: int = ROWS, cols_labirinto: int = COL
     dist1 = _bfs_distancias(grid, ponto_a, rows, colunas_total)
     ponto_b = max(dist1, key=dist1.get)
     inicio, objetivo = ponto_a, ponto_b
+    recompensa_isolada = (linha_inicio_sala, col_sala)
+    if premio_isolado:
+        objetivo = (linha_fim_sala - 1, col_sala + largura_sala_isolada - 1)
 
     pesos_terreno = [('.', 0.55), (':', 0.25), ('^', 0.12), ('~', 0.08)]
     letras, pesos = zip(*pesos_terreno)
@@ -204,7 +229,8 @@ def gerar_ambiente(seed: int = SEED, rows: int = ROWS, cols_labirinto: int = COL
     excluir = {inicio, objetivo} | sala_isolada_cels
     candidatas_recompensa = [p for p in floor_labirinto if p not in excluir]
     rng.shuffle(candidatas_recompensa)
-    recompensas = sorted(candidatas_recompensa[:min(num_recompensas, len(candidatas_recompensa))])
+    recompensas = sorted(candidatas_recompensa[:min(num_recompensas, len(candidatas_recompensa))]
+                         + [recompensa_isolada])
 
     grid_strings = [''.join(row) for row in grid]
     return Ambiente(grid=grid_strings, inicio=inicio, objetivo=objetivo,
