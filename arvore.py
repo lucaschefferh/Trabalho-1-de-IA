@@ -62,7 +62,7 @@ def calcular_layout(pais: dict, raiz):
                 profundidade[f] = profundidade[no] + 1
                 pilha.append((f, False))
 
-    return posicoes, filhos
+    return posicoes
 
 
 def _posicao_do_no(no):
@@ -87,7 +87,7 @@ def construir_figura(resultado: ResultadoBusca) -> Figure:
         ax.axis("off")
         return fig
 
-    posicoes, _ = calcular_layout(pais, raiz)
+    posicoes = calcular_layout(pais, raiz)
 
     caminho = set(resultado.caminho_nos)
     arestas_caminho = set()
@@ -158,34 +158,3 @@ def construir_figura(resultado: ResultadoBusca) -> Figure:
     ax.axis("off")
     fig.tight_layout()
     return fig
-
-
-def mostrar_janela_arvore(parent: tk.Widget, resultado: ResultadoBusca) -> None:
-    # Importados aqui para que `construir_figura` (usada pela versão
-    # Streamlit/Docker) funcione em ambientes sem Tkinter.
-    import tkinter as tk
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-
-    janela = tk.Toplevel(parent)
-    janela.title(f"Árvore de Busca — {resultado.nome}")
-    janela.geometry("1000x720")
-    janela.configure(bg="#1e1f26")
-
-    fig = construir_figura(resultado)
-    canvas = FigureCanvasTkAgg(fig, master=janela)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    barra = NavigationToolbar2Tk(canvas, janela)
-    barra.configure(background="#1e1f26")
-    barra.update()
-    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    legenda = tk.Label(
-        janela,
-        text="Azul = início   Verde = objetivo   Amarelo = recompensa   "
-             "Laranja = nós/arestas do caminho encontrado   "
-             "Use a lupa da barra de ferramentas para dar zoom.",
-        bg="#1e1f26", fg="white", font=("Segoe UI", 9), pady=6,
-    )
-    legenda.pack(fill=tk.X)

@@ -1,7 +1,6 @@
 """
 Implementação dos algoritmos de busca pedidos no trabalho — Busca em Largura
-(BFS), Busca em Profundidade (DFS), Busca Gulosa e A* — e, como referência
-extra, a Busca de Custo Uniforme (Dijkstra), que é o A* com h(n) = 0.
+(BFS), Busca em Profundidade (DFS), Busca Gulosa e A*.
 
 Todos devolvem um `ResultadoBusca` com o caminho, o custo, as recompensas
 coletadas e as métricas usadas no comparativo: nós expandidos, nós gerados,
@@ -13,8 +12,8 @@ Operam sobre o grafo do mapa: o estado é apenas a posição do agente. Não
 "enxergam" recompensas nem custos de terreno; o agente coleta as recompensas
 que estiverem nos vértices do caminho encontrado até o prêmio.
 
-Buscas informadas (Gulosa, A* e Custo Uniforme)
------------------------------------------------
+Buscas informadas (Gulosa e A*)
+-------------------------------
 Para que o algoritmo consiga decidir se *compensa desviar* da rota para pegar
 uma recompensa, isso precisa fazer parte do problema, e não só da heurística.
 Formulação:
@@ -32,10 +31,6 @@ Minimizar J equivale a maximizar o saldo = V · coletadas − custo do percurso.
 Assim, desviar até uma recompensa compensa exatamente quando o custo extra do
 desvio é menor que V. Todos os custos são não negativos, então as garantias
 clássicas do A* continuam valendo.
-
-Recompensas fora da componente conexa do início (ex.: sala sem portas) são
-descartadas antes da busca: não há como coletá-las, e mantê-las só
-multiplicaria o espaço de estados sem mudar a decisão.
 """
 
 from __future__ import annotations
@@ -50,7 +45,9 @@ from mapa import Ambiente
 Posicao = tuple[int, int]
 Estado = tuple[Posicao, int]  # (posição, máscara de recompensas coletadas)
 
-VALOR_RECOMPENSA = 15  # V: quanto vale cada recompensa, na mesma unidade do custo
+# V: quanto vale cada recompensa, na mesma unidade do custo. O enunciado não
+# define esse valor; este é o padrão, ajustável pelo slider da interface.
+VALOR_RECOMPENSA = 15
 
 # Comparativo de tempo: cada algoritmo é repetido até REPETICOES_TEMPO vezes
 # (ou até estourar ORCAMENTO_TEMPO_S) e o tempo reportado é a média.
@@ -74,47 +71,34 @@ ORCAMENTO_TEMPO_S = 1.0
 # da rota têm c pequeno; recompensas longe ficam limitadas a V, ou seja, a
 # heurística já assume que elas serão abandonadas.
 #
-# A*:     h(p, M) = d(p, G) + max_r c(p, r)
-#   Admissível: para qualquer r, a solução ótima a partir de p ou passa por r
-#   (custo ≥ d(p,r) + d(r,G) = d(p,G) + desvio) ou não passa (custo ≥ d(p,G) + V).
-#   Logo o custo real é ≥ d(p,G) + c(p,r) para todo r, e portanto ≥ o máximo.
-#   Não é necessariamente consistente, por isso o A* reabre nós (ver abaixo).
+# Heurística (a mesma na Gulosa e no A*):
 #
-# Gulosa: h(p, M) = d(p, G) + Σ_r c(p, r)
-#   Soma a contribuição de todas as recompensas: é mais informativa para
-#   guiar a busca na direção de grupos de recompensas, mas não é admissível
-#   (desvios para recompensas vizinhas compartilham passos). Para a Gulosa isso
-#   não importa: ela já não garante o ótimo, só busca chegar rápido.
+#   h(p, M) = d(p, G) + max_r c(p, r)
+#
+# É admissível: para qualquer r, a solução ótima a partir de p ou passa por r
+# (custo ≥ d(p,r) + d(r,G) = d(p,G) + desvio) ou não passa (custo ≥ d(p,G) + V).
+# Logo o custo real é ≥ d(p,G) + c(p,r) para todo r, e portanto ≥ o máximo.
+# Não é necessariamente consistente, por isso o A* reabre nós (ver abaixo).
 
 
 def distancia_manhattan(a: Posicao, b: Posicao) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-def _custos_recompensas(pos: Posicao, objetivo: Posicao,
-                         restantes: Iterable[Posicao]) -> tuple[int, list[int]]:
+def _custos_recompensas(pos: Posicao, objetivo: Posicao, restantes: Iterable[Posicao],
+                         valor: int) -> tuple[int, list[int]]:
     d_obj = distancia_manhattan(pos, objetivo)
     custos = []
     for r in restantes:
         desvio = distancia_manhattan(pos, r) + distancia_manhattan(r, objetivo) - d_obj
-        custos.append(min(VALOR_RECOMPENSA, desvio))
+        custos.append(min(valor, desvio))
     return d_obj, custos
 
 
-def heuristica_a_estrela(pos: Posicao, objetivo: Posicao,
-                          restantes: Iterable[Posicao]) -> int:
-    d_obj, custos = _custos_recompensas(pos, objetivo, restantes)
+def heuristica(pos: Posicao, objetivo: Posicao, restantes: Iterable[Posicao],
+                valor: int = VALOR_RECOMPENSA) -> int:
+    d_obj, custos = _custos_recompensas(pos, objetivo, restantes, valor)
     return d_obj + max(custos, default=0)
-
-
-def heuristica_gulosa(pos: Posicao, objetivo: Posicao,
-                       restantes: Iterable[Posicao]) -> int:
-    d_obj, custos = _custos_recompensas(pos, objetivo, restantes)
-    return d_obj + sum(custos)
-
-
-def heuristica_nula(_pos: Posicao, _objetivo: Posicao, _restantes: Iterable[Posicao]) -> int:
-    return 0
 
 
 # --- Resultado ---------------------------------------------------------------
@@ -136,6 +120,7 @@ class ResultadoBusca:
     raiz: Hashable = None
     caminho_nos: list[Hashable] = field(default_factory=list)
     repeticoes_tempo: int = 1
+    valor_recompensa: int = VALOR_RECOMPENSA  # V usado nesta execução
 
     @property
     def encontrou_caminho(self) -> bool:
@@ -144,7 +129,7 @@ class ResultadoBusca:
     @property
     def saldo(self) -> float:
         """V · recompensas coletadas − custo do percurso (quanto maior, melhor)."""
-        return VALOR_RECOMPENSA * len(self.recompensas_coletadas) - self.custo_total
+        return self.valor_recompensa * len(self.recompensas_coletadas) - self.custo_total
 
 
 def _reconstruir(pais: dict, raiz, final) -> list:
@@ -163,11 +148,12 @@ def _custo_do_caminho(ambiente: Ambiente, caminho: list[Posicao]) -> int:
 def _empacotar_resultado(nome: str, ambiente: Ambiente, pais: dict, raiz, final,
                           posicao_do_no: Callable[[Hashable], Posicao],
                           nos_expandidos: int, nos_gerados: int, max_fronteira: int,
-                          tempo_inicio: float) -> ResultadoBusca:
+                          tempo_inicio: float, valor: int) -> ResultadoBusca:
     tempo_execucao = time.perf_counter() - tempo_inicio
     metricas = dict(nome=nome, ambiente=ambiente, nos_expandidos=nos_expandidos,
                     nos_gerados=nos_gerados, max_fronteira=max_fronteira,
-                    tempo_execucao_s=tempo_execucao, arvore_pais=pais, raiz=raiz)
+                    tempo_execucao_s=tempo_execucao, arvore_pais=pais, raiz=raiz,
+                    valor_recompensa=valor)
     if final is None:
         return ResultadoBusca(caminho=None, custo_total=0, recompensas_coletadas=[],
                               **metricas)
@@ -186,9 +172,10 @@ def _identidade(pos: Posicao) -> Posicao:
 
 # --- Buscas cegas ------------------------------------------------------------
 
-def busca_em_largura(ambiente: Ambiente) -> ResultadoBusca:
+def busca_em_largura(ambiente: Ambiente, valor: int = VALOR_RECOMPENSA) -> ResultadoBusca:
     """BFS: explora por camadas (nº de arestas), ignorando o custo do
-    terreno. Encontra o caminho com menos passos, não o de menor custo."""
+    terreno. Encontra o caminho com menos passos, não o de menor custo.
+    `valor` não influencia a busca; só entra no cálculo do saldo."""
     t0 = time.perf_counter()
     inicio, objetivo = ambiente.inicio, ambiente.objetivo
     fronteira: list[Posicao] = [inicio]
@@ -216,12 +203,14 @@ def busca_em_largura(ambiente: Ambiente) -> ResultadoBusca:
                 nos_gerados += 1
 
     return _empacotar_resultado("Busca em Largura", ambiente, pais, inicio, final,
-                                _identidade, nos_expandidos, nos_gerados, max_fronteira, t0)
+                                _identidade, nos_expandidos, nos_gerados, max_fronteira, t0,
+                                valor)
 
 
-def busca_em_profundidade(ambiente: Ambiente) -> ResultadoBusca:
+def busca_em_profundidade(ambiente: Ambiente, valor: int = VALOR_RECOMPENSA) -> ResultadoBusca:
     """DFS: mergulha por um ramo até o fim antes de tentar outro. Acha *um*
-    caminho, sem garantia de ser o mais curto nem o de menor custo."""
+    caminho, sem garantia de ser o mais curto nem o de menor custo.
+    `valor` não influencia a busca; só entra no cálculo do saldo."""
     t0 = time.perf_counter()
     inicio, objetivo = ambiente.inicio, ambiente.objetivo
     pilha: list[Posicao] = [inicio]
@@ -247,22 +236,22 @@ def busca_em_profundidade(ambiente: Ambiente) -> ResultadoBusca:
                 nos_gerados += 1
 
     return _empacotar_resultado("Busca em Profundidade", ambiente, pais, inicio, final,
-                                _identidade, nos_expandidos, nos_gerados, max_fronteira, t0)
+                                _identidade, nos_expandidos, nos_gerados, max_fronteira, t0,
+                                valor)
 
 
 # --- Buscas informadas -------------------------------------------------------
 
-def _busca_espaco_estados(ambiente: Ambiente, nome: str,
-                           heuristica: Callable[[Posicao, Posicao, Iterable[Posicao]], float],
-                           usa_custo_acumulado: bool) -> ResultadoBusca:
+def _busca_espaco_estados(ambiente: Ambiente, nome: str, usa_custo_acumulado: bool,
+                           valor: int) -> ResultadoBusca:
     """Busca de melhor escolha sobre os estados (posição, máscara).
 
     Prioridade de um estado s com custo acumulado g:
-      * s não final: g + h(s) no A*/Custo Uniforme, ou só h(s) na Gulosa;
+      * s não final: g + h(s) no A*, ou só h(s) na Gulosa;
       * s final (no prêmio): o restante do custo é conhecido exatamente — o
         custo terminal V · (recompensas não coletadas) — e é usado no lugar de h.
 
-    A* e Custo Uniforme reabrem um estado sempre que acham um caminho mais
+    O A* reabre um estado sempre que acha um caminho mais
     barato até ele (entradas obsoletas no heap são descartadas ao sair). Isso é
     necessário porque a heurística do A* é admissível mas não consistente.
     Com isso, o primeiro estado final retirado do heap é ótimo.
@@ -278,8 +267,7 @@ def _busca_espaco_estados(ambiente: Ambiente, nome: str,
     t0 = time.perf_counter()
     inicio, objetivo = ambiente.inicio, ambiente.objetivo
 
-    alcancaveis = ambiente.alcancaveis(inicio)
-    recompensas = [r for r in ambiente.recompensas if r in alcancaveis]
+    recompensas = list(ambiente.recompensas)
     bit_de = {r: 1 << i for i, r in enumerate(recompensas)}
 
     def entrar(pos: Posicao, mascara: int) -> Estado:
@@ -289,9 +277,9 @@ def _busca_espaco_estados(ambiente: Ambiente, nome: str,
         pos, mascara = estado
         if pos == objetivo:
             faltando = len(recompensas) - bin(mascara).count("1")
-            return g + VALOR_RECOMPENSA * faltando
+            return g + valor * faltando
         restantes = [r for r in recompensas if not mascara & bit_de[r]]
-        h = heuristica(pos, objetivo, restantes)
+        h = heuristica(pos, objetivo, restantes, valor)
         return g + h if usa_custo_acumulado else h
 
     estado_inicial = entrar(inicio, 0)
@@ -344,38 +332,33 @@ def _busca_espaco_estados(ambiente: Ambiente, nome: str,
 
     return _empacotar_resultado(nome, ambiente, pais, estado_inicial, final,
                                 lambda estado: estado[0], nos_expandidos, nos_gerados,
-                                max_fronteira, t0)
+                                max_fronteira, t0, valor)
 
 
-def busca_gulosa(ambiente: Ambiente) -> ResultadoBusca:
-    """Gulosa: expande sempre o estado com menor h (distância ao prêmio +
-    preço estimado de cada recompensa restante), ignorando o custo já gasto.
-    Tende a coletar muitas recompensas, mas sem garantia de saldo ótimo."""
-    return _busca_espaco_estados(ambiente, "Busca Gulosa", heuristica_gulosa,
-                                 usa_custo_acumulado=False)
+def busca_gulosa(ambiente: Ambiente, valor: int = VALOR_RECOMPENSA) -> ResultadoBusca:
+    """Gulosa: expande sempre o estado com menor h, ignorando o custo já gasto.
+    Rápida, mas sem garantia de rota ótima."""
+    return _busca_espaco_estados(ambiente, "Busca Gulosa", False, valor)
 
 
-def busca_a_estrela(ambiente: Ambiente) -> ResultadoBusca:
-    """A*: ordena por f = g + h com h admissível; devolve a rota de menor
-    custo total J, desviando para recompensas só quando o desvio compensa."""
-    return _busca_espaco_estados(ambiente, "A*", heuristica_a_estrela,
-                                 usa_custo_acumulado=True)
+def busca_a_estrela(ambiente: Ambiente, valor: int = VALOR_RECOMPENSA) -> ResultadoBusca:
+    """A*: ordena por f = g + h. Com a heurística admissível devolve a rota de
+    menor custo total J, desviando para recompensas só quando compensa."""
+    return _busca_espaco_estados(ambiente, "A*", True, valor)
 
 
-def busca_custo_uniforme(ambiente: Ambiente) -> ResultadoBusca:
-    """Custo Uniforme (Dijkstra): A* com h = 0. Também é ótimo, e serve de
-    referência para medir quantos nós a heurística do A* economiza."""
-    return _busca_espaco_estados(ambiente, "Custo Uniforme", heuristica_nula,
-                                 usa_custo_acumulado=True)
-
-
-ALGORITMOS: dict[str, Callable[[Ambiente], ResultadoBusca]] = {
+ALGORITMOS: dict[str, Callable[..., ResultadoBusca]] = {
     "Busca em Largura": busca_em_largura,
     "Busca em Profundidade": busca_em_profundidade,
     "Busca Gulosa": busca_gulosa,
     "A*": busca_a_estrela,
-    "Custo Uniforme": busca_custo_uniforme,
 }
+
+def executar_algoritmo(nome: str, ambiente: Ambiente,
+                        valor: int = VALOR_RECOMPENSA) -> ResultadoBusca:
+    """Roda um algoritmo pelo nome. `valor` é o V de cada recompensa (nas
+    buscas cegas, só afeta o saldo)."""
+    return ALGORITMOS[nome](ambiente, valor)
 
 
 def executar_com_tempo_medio(algoritmo: Callable[[Ambiente], ResultadoBusca],
