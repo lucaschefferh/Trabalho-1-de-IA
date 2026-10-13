@@ -263,8 +263,8 @@ def main() -> None:
             f"1. Escolha o **formato do labirinto** e clique em *Gerar Mapa*.\n"
             f"2. Escolha um **algoritmo** e clique em *Calcular Rota*: o caminho aparece em "
             f"laranja e as métricas ao lado.\n"
-            f"3. Veja a **árvore de busca** (o que o algoritmo explorou) e use *Comparar "
-            f"Algoritmos* para ver os quatro lado a lado.\n\n"
+            f"3. Veja a **árvore de busca** (o que o algoritmo explorou) e abra a aba "
+            f"*Comparação entre Algoritmos* para ver os quatro lado a lado.\n\n"
             f"**Saldo = {valor} × recompensas coletadas − custo do percurso.** "
             f"Vale a pena desviar para uma recompensa só se o desvio custar menos que "
             f"{valor}.")
@@ -322,13 +322,6 @@ def main() -> None:
             limpar_resultados()
             st.rerun()
 
-        st.divider()
-        if st.button("Comparar Algoritmos", width="stretch"):
-            st.session_state.comparacao = {
-                nome: executar_com_tempo_medio(
-                    lambda a, nome=nome: executar_algoritmo(nome, a, valor), ambiente)
-                for nome in ALGORITMOS}
-
     col_mapa, col_status = st.columns([2, 1], gap="large")
 
     with col_mapa:
@@ -369,7 +362,10 @@ def main() -> None:
         st.caption("Passe o mouse sobre o **?** de cada métrica para ver o que ela significa.")
 
     st.divider()
-    aba_arvore, aba_comparacao = st.tabs(["Árvore de Busca", "Comparação entre Algoritmos"])
+    # on_change="rerun": o conteúdo de cada aba só roda quando ela está aberta, então a
+    # comparação (que executa os 4 algoritmos várias vezes) só é calculada ao abrir a aba.
+    aba_arvore, aba_comparacao = st.tabs(["Árvore de Busca", "Comparação entre Algoritmos"],
+                                          key="abas", on_change="rerun")
 
     with aba_arvore:
         if resultado is None:
@@ -385,10 +381,14 @@ def main() -> None:
                        "Árvore larga = muita exploração; árvore estreita = busca direta.")
 
     with aba_comparacao:
-        comparacao = st.session_state.comparacao
-        if comparacao is None:
-            st.info("Clique em \"Comparar Algoritmos\" na barra lateral.")
-        else:
+        if aba_comparacao.open:
+            if st.session_state.comparacao is None:
+                with st.spinner("Executando os 4 algoritmos..."):
+                    st.session_state.comparacao = {
+                        nome: executar_com_tempo_medio(
+                            lambda a, nome=nome: executar_algoritmo(nome, a, valor), ambiente)
+                        for nome in ALGORITMOS}
+            comparacao = st.session_state.comparacao
             st.dataframe(montar_tabela_comparacao(comparacao, ambiente), width="stretch")
             st.caption(f"Saldo = {valor} × recompensas − custo do percurso. "
                        "Tempo = média de várias execuções. Pico da fronteira = maior "
