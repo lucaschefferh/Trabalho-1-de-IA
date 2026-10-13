@@ -31,12 +31,6 @@ CUSTOS_TERRENO = {
     '~': 20,  # pântano
 }
 
-SEED = 42
-ROWS = 15
-COLS_LABIRINTO = 21
-LARGURA_SALA_ISOLADA = 4
-NUM_RECOMPENSAS = 6
-
 # Formatos de labirinto prontos para escolher na interface — cada um varia
 # tamanho, seed e fração de laços/atalhos, mudando bastante a "cara" do
 # ambiente e, por consequência, o comportamento dos algoritmos de busca.
@@ -51,11 +45,6 @@ PRESETS_LABIRINTO: dict[str, dict] = {
                                             fracao_lacos=0.03, num_recompensas=6),
     "Aberto — muitos atalhos (21×15)": dict(seed=7, rows=15, cols_labirinto=21,
                                              fracao_lacos=0.35, num_recompensas=6),
-    # Prêmio dentro da sala sem portas: todos os algoritmos devem esgotar a
-    # fronteira e concluir que não existe caminho.
-    "Prêmio inalcançável (21×15)": dict(seed=42, rows=15, cols_labirinto=21,
-                                         fracao_lacos=0.15, num_recompensas=6,
-                                         premio_isolado=True),
 }
 PRESET_PADRAO = "Padrão (21×15)"
 
@@ -86,7 +75,7 @@ def _gerar_labirinto(rows: int, cols: int, rng: random.Random) -> list[list[str]
 
 
 def _adicionar_lacos(grid: list[list[str]], rng: random.Random, rows: int, cols: int,
-                      fracao: float = 0.15) -> None:
+                      fracao: float) -> None:
     """Derruba algumas paredes internas para criar caminhos alternativos,
     transformando o labirinto 'perfeito' (uma única rota entre dois pontos)
     em um grafo com laços — essencial para a busca ter escolhas reais."""
@@ -154,83 +143,39 @@ class Ambiente:
         que o agente está pisando ao chegar na célula."""
         return self.custo_terreno(destino)
 
-    def alcancaveis(self, origem: tuple[int, int]) -> set[tuple[int, int]]:
-        """Componente conexa de `origem` (BFS simples). Usada pelas buscas
-        informadas para descartar recompensas que ficam atrás de paredes."""
-        visitados = {origem}
-        fila = deque([origem])
-        while fila:
-            atual = fila.popleft()
-            for viz in self.vizinhos(atual):
-                if viz not in visitados:
-                    visitados.add(viz)
-                    fila.append(viz)
-        return visitados
 
-
-def gerar_ambiente(seed: int = SEED, rows: int = ROWS, cols_labirinto: int = COLS_LABIRINTO,
-                    largura_sala_isolada: int = LARGURA_SALA_ISOLADA,
-                    num_recompensas: int = NUM_RECOMPENSAS,
-                    fracao_lacos: float = 0.15, premio_isolado: bool = False) -> Ambiente:
+def gerar_ambiente(seed: int, rows: int, cols_labirinto: int, num_recompensas: int,
+                    fracao_lacos: float) -> Ambiente:
     """Gera um ambiente determinístico (mesma seed => mesmo mapa). Os
     parâmetros controlam o "formato" do labirinto: tamanho, quantidade de
     atalhos/laços e número de recompensas — usados pelos presets em
-    `PRESETS_LABIRINTO` para oferecer mapas bem diferentes entre si.
-
-    Além das `num_recompensas` do labirinto, uma recompensa extra é sempre
-    colocada na sala isolada (inalcançável). Com `premio_isolado=True` o
-    próprio prêmio final também fica lá dentro."""
+    `PRESETS_LABIRINTO` para oferecer mapas bem diferentes entre si."""
     rng = random.Random(seed)
-    grid_labirinto = _gerar_labirinto(rows, cols_labirinto, rng)
-    _adicionar_lacos(grid_labirinto, rng, rows, cols_labirinto, fracao=fracao_lacos)
+    grid = _gerar_labirinto(rows, cols_labirinto, rng)
+    _adicionar_lacos(grid, rng, rows, cols_labirinto, fracao=fracao_lacos)
 
-    colunas_total = cols_labirinto + 1 + largura_sala_isolada + 1
-    grid = [['#'] * colunas_total for _ in range(rows)]
-    for r in range(rows):
-        for c in range(cols_labirinto):
-            grid[r][c] = grid_labirinto[r][c]
+    celulas = [(r, c) for r in range(rows) for c in range(cols_labirinto)
+               if grid[r][c] != '#']
 
-    # Sala isolada, sem nenhuma porta de acesso: usada para demonstrar que o
-    # sistema detecta corretamente quando não existe caminho até o destino.
-    # Posição/altura são relativas ao tamanho do mapa para funcionar em
-    # qualquer um dos presets.
-    col_sala = cols_labirinto + 1
-    altura_sala = min(5, max(2, rows - 4))
-    linha_inicio_sala = max(1, (rows - altura_sala) // 2)
-    linha_fim_sala = min(rows - 1, linha_inicio_sala + altura_sala)
-    for r in range(linha_inicio_sala, linha_fim_sala):
-        for c in range(col_sala, col_sala + largura_sala_isolada):
-            grid[r][c] = '.'
-
-    floor_labirinto = [(r, c) for r in range(rows) for c in range(cols_labirinto)
-                        if grid[r][c] != '#']
-
-    dist0 = _bfs_distancias(grid, floor_labirinto[0], rows, colunas_total)
+    # Início e prêmio: as duas pontas mais distantes do labirinto (diâmetro
+    # do grafo, achado com duas BFS).
+    dist0 = _bfs_distancias(grid, celulas[0], rows, cols_labirinto)
     ponto_a = max(dist0, key=dist0.get)
-    dist1 = _bfs_distancias(grid, ponto_a, rows, colunas_total)
+    dist1 = _bfs_distancias(grid, ponto_a, rows, cols_labirinto)
     ponto_b = max(dist1, key=dist1.get)
     inicio, objetivo = ponto_a, ponto_b
-    recompensa_isolada = (linha_inicio_sala, col_sala)
-    if premio_isolado:
-        objetivo = (linha_fim_sala - 1, col_sala + largura_sala_isolada - 1)
 
     pesos_terreno = [('.', 0.55), (':', 0.25), ('^', 0.12), ('~', 0.08)]
     letras, pesos = zip(*pesos_terreno)
-    todas_celulas = [(r, c) for r in range(rows) for c in range(colunas_total)
-                      if grid[r][c] != '#']
-    for (r, c) in todas_celulas:
+    for (r, c) in celulas:
         if (r, c) not in (inicio, objetivo):
             grid[r][c] = rng.choices(letras, weights=pesos, k=1)[0]
         else:
             grid[r][c] = '.'
 
-    sala_isolada_cels = {(r, c) for r in range(linha_inicio_sala, linha_fim_sala)
-                          for c in range(col_sala, col_sala + largura_sala_isolada)}
-    excluir = {inicio, objetivo} | sala_isolada_cels
-    candidatas_recompensa = [p for p in floor_labirinto if p not in excluir]
+    candidatas_recompensa = [p for p in celulas if p not in (inicio, objetivo)]
     rng.shuffle(candidatas_recompensa)
-    recompensas = sorted(candidatas_recompensa[:min(num_recompensas, len(candidatas_recompensa))]
-                         + [recompensa_isolada])
+    recompensas = sorted(candidatas_recompensa[:num_recompensas])
 
     grid_strings = [''.join(row) for row in grid]
     return Ambiente(grid=grid_strings, inicio=inicio, objetivo=objetivo,
